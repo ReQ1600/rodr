@@ -8,7 +8,7 @@
   *
   * Copyright (c) 2025 STMicroelectronics.
   * All rights reserved.
-  *test
+  *
   * This software is licensed under terms that can be found in the LICENSE file
   * in the root directory of this software component.
   * If no LICENSE file comes with this software, it is provided AS-IS.
@@ -18,11 +18,14 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "string.h"
+#include "cmsis_os.h"
+#include "lwip.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <string.h>
+#include <stdio.h>
+#include "lwip/api.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -32,7 +35,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define MAX_MSG_SIZE 64
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -41,31 +44,15 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-#if defined ( __ICCARM__ ) /*!< IAR Compiler */
-#pragma location=0x2007c000
-ETH_DMADescTypeDef  DMARxDscrTab[ETH_RX_DESC_CNT]; /* Ethernet Rx DMA Descriptors */
-#pragma location=0x2007c0a0
-ETH_DMADescTypeDef  DMATxDscrTab[ETH_TX_DESC_CNT]; /* Ethernet Tx DMA Descriptors */
-
-#elif defined ( __CC_ARM )  /* MDK ARM Compiler */
-
-__attribute__((at(0x2007c000))) ETH_DMADescTypeDef  DMARxDscrTab[ETH_RX_DESC_CNT]; /* Ethernet Rx DMA Descriptors */
-__attribute__((at(0x2007c0a0))) ETH_DMADescTypeDef  DMATxDscrTab[ETH_TX_DESC_CNT]; /* Ethernet Tx DMA Descriptors */
-
-#elif defined ( __GNUC__ ) /* GNU Compiler */
-
-ETH_DMADescTypeDef DMARxDscrTab[ETH_RX_DESC_CNT] __attribute__((section(".RxDecripSection"))); /* Ethernet Rx DMA Descriptors */
-ETH_DMADescTypeDef DMATxDscrTab[ETH_TX_DESC_CNT] __attribute__((section(".TxDecripSection")));   /* Ethernet Tx DMA Descriptors */
-#endif
-
-ETH_TxPacketConfig TxConfig;
-
-ETH_HandleTypeDef heth;
 
 UART_HandleTypeDef huart3;
 
 PCD_HandleTypeDef hpcd_USB_OTG_FS;
 
+osThreadId defaultTaskHandle;
+osThreadId TCPServerTaskHandle;
+osThreadId UDPStreamTaskHandle;
+osMessageQId UDPMsgQueueHandle;
 /* USER CODE BEGIN PV */
 
 /* USER CODE END PV */
@@ -73,9 +60,12 @@ PCD_HandleTypeDef hpcd_USB_OTG_FS;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_ETH_Init(void);
 static void MX_USART3_UART_Init(void);
 static void MX_USB_OTG_FS_PCD_Init(void);
+void StartDefaultTask(void const * argument);
+void StartTCPServerTask(void const * argument);
+void StartUDPStreamTask(void const * argument);
+
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -114,12 +104,54 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_ETH_Init();
   MX_USART3_UART_Init();
   MX_USB_OTG_FS_PCD_Init();
   /* USER CODE BEGIN 2 */
 
   /* USER CODE END 2 */
+
+  /* USER CODE BEGIN RTOS_MUTEX */
+  /* add mutexes, ... */
+  /* USER CODE END RTOS_MUTEX */
+
+  /* USER CODE BEGIN RTOS_SEMAPHORES */
+  /* add semaphores, ... */
+  /* USER CODE END RTOS_SEMAPHORES */
+
+  /* USER CODE BEGIN RTOS_TIMERS */
+  /* start timers, add new ones, ... */
+  /* USER CODE END RTOS_TIMERS */
+
+  /* Create the queue(s) */
+  /* definition and creation of UDPMsgQueue */
+  osMessageQDef(UDPMsgQueue, 16, float);
+  UDPMsgQueueHandle = osMessageCreate(osMessageQ(UDPMsgQueue), NULL);
+
+  /* USER CODE BEGIN RTOS_QUEUES */
+  /* add queues, ... */
+  /* USER CODE END RTOS_QUEUES */
+
+  /* Create the thread(s) */
+  /* definition and creation of defaultTask */
+  osThreadDef(defaultTask, StartDefaultTask, osPriorityNormal, 0, 512);
+  defaultTaskHandle = osThreadCreate(osThread(defaultTask), NULL);
+
+  /* definition and creation of TCPServerTask */
+  osThreadDef(TCPServerTask, StartTCPServerTask, osPriorityIdle, 0, 512);
+  TCPServerTaskHandle = osThreadCreate(osThread(TCPServerTask), NULL);
+
+  /* definition and creation of UDPStreamTask */
+  osThreadDef(UDPStreamTask, StartUDPStreamTask, osPriorityIdle, 0, 516);
+  UDPStreamTaskHandle = osThreadCreate(osThread(UDPStreamTask), NULL);
+
+  /* USER CODE BEGIN RTOS_THREADS */
+  /* add threads, ... */
+  /* USER CODE END RTOS_THREADS */
+
+  /* Start scheduler */
+  osKernelStart();
+
+  /* We should never get here as control is now taken by the scheduler */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
@@ -187,55 +219,6 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-}
-
-/**
-  * @brief ETH Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_ETH_Init(void)
-{
-
-  /* USER CODE BEGIN ETH_Init 0 */
-
-  /* USER CODE END ETH_Init 0 */
-
-   static uint8_t MACAddr[6];
-
-  /* USER CODE BEGIN ETH_Init 1 */
-
-  /* USER CODE END ETH_Init 1 */
-  heth.Instance = ETH;
-  MACAddr[0] = 0x00;
-  MACAddr[1] = 0x80;
-  MACAddr[2] = 0xE1;
-  MACAddr[3] = 0x00;
-  MACAddr[4] = 0x00;
-  MACAddr[5] = 0x00;
-  heth.Init.MACAddr = &MACAddr[0];
-  heth.Init.MediaInterface = HAL_ETH_RMII_MODE;
-  heth.Init.TxDesc = DMATxDscrTab;
-  heth.Init.RxDesc = DMARxDscrTab;
-  heth.Init.RxBuffLen = 1524;
-
-  /* USER CODE BEGIN MACADDRESS */
-
-  /* USER CODE END MACADDRESS */
-
-  if (HAL_ETH_Init(&heth) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  memset(&TxConfig, 0 , sizeof(ETH_TxPacketConfig));
-  TxConfig.Attributes = ETH_TX_PACKETS_FEATURES_CSUM | ETH_TX_PACKETS_FEATURES_CRCPAD;
-  TxConfig.ChecksumCtrl = ETH_CHECKSUM_IPHDR_PAYLOAD_INSERT_PHDR_CALC;
-  TxConfig.CRCPadCtrl = ETH_CRC_PAD_INSERT;
-  /* USER CODE BEGIN ETH_Init 2 */
-
-  /* USER CODE END ETH_Init 2 */
-
 }
 
 /**
@@ -368,6 +351,200 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 
 /* USER CODE END 4 */
+
+/* USER CODE BEGIN Header_StartDefaultTask */
+/**
+  * @brief  Function implementing the defaultTask thread.
+  * @param  argument: Not used
+  * @retval None
+  */
+/* USER CODE END Header_StartDefaultTask */
+void StartDefaultTask(void const * argument)
+{
+  /* init code for LWIP */
+  MX_LWIP_Init();
+  /* USER CODE BEGIN 5 */
+  int ctr = 0;
+  float sensor_data = 2137.223f;
+  /* Infinite loop */
+  for(;;)
+  {
+	  if (ctr % 200 == 0) HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+
+	  if (ctr % 100 == 0)
+	  {
+		  //packing float into int to put it into queue
+		  uint32_t packed_data;
+		  memcpy(&packed_data, &sensor_data, sizeof(float));
+
+		  osMessagePut(UDPMsgQueueHandle, packed_data, osWaitForever);
+	  }
+
+	  ++ctr;
+	  osDelay(1);
+  }
+  /* USER CODE END 5 */
+}
+
+/* USER CODE BEGIN Header_StartTCPServerTask */
+/**
+* @brief Function implementing the TCPServerTask thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartTCPServerTask */
+void StartTCPServerTask(void const * argument)
+{
+  /* USER CODE BEGIN StartTCPServerTask */
+	osDelay(100);
+
+	//msg setup
+	struct netbuf* pNetbuf;
+	void* data;
+	uint16_t data_len;
+	char msg[MAX_MSG_SIZE] = { 0 };
+	uint16_t msg_len;
+
+	//TCP setup
+	struct netconn* pTCP_conn_server;
+	pTCP_conn_server = netconn_new(NETCONN_TCP);
+
+	netconn_bind(pTCP_conn_server, IP4_ADDR_ANY, 2000);
+
+	struct netconn* pTCP_conn_client;
+	err_t accept_err;
+
+	netconn_listen(pTCP_conn_server);
+  /* Infinite loop */
+	for(;;)
+  {
+	  //try to acquire new connection
+	  accept_err = netconn_accept(pTCP_conn_server, &pTCP_conn_client);
+
+	  //process conn if acquired
+	  if (accept_err == ERR_OK)
+	  {
+		  while (netconn_recv(pTCP_conn_client, &pNetbuf) == ERR_OK)
+		  {
+			  do
+			  {
+				  netbuf_data(pNetbuf, &data, &data_len);
+
+				  //process data
+				  if(pNetbuf->p->len >= strlen("PING"))
+				  {
+					  //handling ping
+					  if (!strcmp((char*)pNetbuf->p->payload, "PING"))
+					  {
+						  msg_len = snprintf(msg, MAX_MSG_SIZE, "PONG\r\n");
+						  netconn_write(pTCP_conn_client, msg, msg_len, NETCONN_COPY);
+					  }
+//					  sscanf((char*)pNetbuf->p->payload, "LED=%c;", &led_state);
+//					  switch(led_state)
+//					  {
+//					  	  case '0':
+//						  	  HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, 0);
+//						  	  break;
+//					  	  case '1':
+//					  		  HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, 1);
+//					  	  	  break;
+//					  	  default:
+//					  		  break;
+//					  }
+				  }
+
+				  //sending msg to the client
+//				  msg_len = snprintf(msg, MAX_MSG_SIZE, "siemano kolano\r\n");
+//				  netconn_write(pTCP_conn_client, msg, msg_len, NETCONN_COPY);
+			  }while(netbuf_next(pNetbuf) >= 0);
+
+			  //cleanup
+			  netbuf_delete(pNetbuf);
+		  }
+		  netconn_close(pTCP_conn_client);
+		  netconn_delete(pTCP_conn_client);
+	  }
+
+    osDelay(100);
+  }
+  /* USER CODE END StartTCPServerTask */
+}
+
+/* USER CODE BEGIN Header_StartUDPStreamTask */
+/**
+* @brief Function implementing the UDPStreamTask thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartUDPStreamTask */
+void StartUDPStreamTask(void const * argument)
+{
+  /* USER CODE BEGIN StartUDPStreamTask */
+	osDelay(100);
+
+	osEvent queue_ret;
+
+	//msg setup
+	char message[MAX_MSG_SIZE];
+	uint16_t msg_length = 0;
+
+	struct netbuf* pNetbuf;
+	pNetbuf = netbuf_new();
+
+	//UDP setup
+	struct netconn* pUDP_conn;
+	pUDP_conn = netconn_new(NETCONN_UDP);
+	netconn_bind(pUDP_conn, IP4_ADDR_ANY, 1000);
+
+	//ipv4 destination setup
+	ip_addr_t dst_addr;
+	IP4_ADDR(&dst_addr, 192, 168, 113, 4);
+
+ 	/* Infinite loop */
+	for(;;)
+	{
+		queue_ret = osMessageGet(UDPMsgQueueHandle, osWaitForever);
+
+		if (queue_ret.status == osEventMessage)
+		{
+			float data;
+			//unpacking data from queue
+			memcpy(&data, &queue_ret.value.v, sizeof(float));
+
+			msg_length = snprintf(message, MAX_MSG_SIZE, "Siemano kolano. [%f]", data);
+			netbuf_alloc(pNetbuf, msg_length);
+			memcpy(pNetbuf->p->payload, message, msg_length);
+			netconn_sendto(pUDP_conn, pNetbuf, &dst_addr, 5000);
+			netbuf_free(pNetbuf);
+
+			osDelay(10);
+		}
+
+	}
+  /* USER CODE END StartUDPStreamTask */
+}
+
+/**
+  * @brief  Period elapsed callback in non blocking mode
+  * @note   This function is called  when TIM14 interrupt took place, inside
+  * HAL_TIM_IRQHandler(). It makes a direct call to HAL_IncTick() to increment
+  * a global variable "uwTick" used as application time base.
+  * @param  htim : TIM handle
+  * @retval None
+  */
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+  /* USER CODE BEGIN Callback 0 */
+
+  /* USER CODE END Callback 0 */
+  if (htim->Instance == TIM14)
+  {
+    HAL_IncTick();
+  }
+  /* USER CODE BEGIN Callback 1 */
+
+  /* USER CODE END Callback 1 */
+}
 
 /**
   * @brief  This function is executed in case of error occurrence.
