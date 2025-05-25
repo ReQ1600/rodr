@@ -435,27 +435,24 @@ void StartTCPServerTask(void const * argument)
 				  {
 					  //handling ping
 					  if (!strcmp((char*)pNetbuf->p->payload, "PING"))
-					  {
-						  msg_len = snprintf(msg, MAX_MSG_SIZE, "PONG\r\n");
-						  netconn_write(pTCP_conn_client, msg, msg_len, NETCONN_COPY);
-					  }
-//					  sscanf((char*)pNetbuf->p->payload, "LED=%c;", &led_state);
-//					  switch(led_state)
-//					  {
-//					  	  case '0':
-//						  	  HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, 0);
-//						  	  break;
-//					  	  case '1':
-//					  		  HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, 1);
-//					  	  	  break;
-//					  	  default:
-//					  		  break;
-//					  }
-				  }
+						  msg_len = snprintf(msg, MAX_MSG_SIZE, "PONG");
 
-				  //sending msg to the client
-//				  msg_len = snprintf(msg, MAX_MSG_SIZE, "siemano kolano\r\n");
-//				  netconn_write(pTCP_conn_client, msg, msg_len, NETCONN_COPY);
+					  //handling setPos
+					  else if (!strncmp((char*)pNetbuf->p->payload, "SETPOS", 6))
+					  {
+						  float target_pos = 0;
+
+						  if (sscanf((char*)pNetbuf->p->payload + 7, "%f", &target_pos))// +7 so that it skips the "SETPOS:" part
+						  {
+							  msg_len = snprintf(msg, MAX_MSG_SIZE, "%f");
+							  //TODO: implement setpos
+						  }
+						  else
+							  msg_len = snprintf(msg, MAX_MSG_SIZE, "SETPOS_ERR");
+					  }
+					  //sends the msg
+					  netconn_write(pTCP_conn_client, msg, msg_len, NETCONN_COPY);
+				  }
 			  }while(netbuf_next(pNetbuf) >= 0);
 
 			  //cleanup
@@ -502,7 +499,7 @@ void StartUDPStreamTask(void const * argument)
 
  	/* Infinite loop */
 	for(;;)
-	{ c
+	{
 		queue_ret = osMessageGet(UDPMsgQueueHandle, osWaitForever);
 
 		if (queue_ret.status == osEventMessage)
