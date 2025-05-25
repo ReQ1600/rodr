@@ -444,7 +444,7 @@ void StartTCPServerTask(void const * argument)
 
 						  if (sscanf((char*)pNetbuf->p->payload + 7, "%f", &target_pos))// +7 so that it skips the "SETPOS:" part
 						  {
-							  msg_len = snprintf(msg, MAX_MSG_SIZE, "%f");
+							  msg_len = snprintf(msg, MAX_MSG_SIZE, "%f", target_pos);
 							  //TODO: implement setpos
 						  }
 						  else
