@@ -433,6 +433,7 @@ void StartTCPServerTask(void const * argument)
 				  //process data
 				  if(pNetbuf->p->len >= strlen("PING"))
 				  {
+					  msg_len = 0;
 					  //handling ping
 					  if (!strcmp((char*)pNetbuf->p->payload, "PING"))
 						  msg_len = snprintf(msg, MAX_MSG_SIZE, "PONG");
@@ -444,14 +445,15 @@ void StartTCPServerTask(void const * argument)
 
 						  if (sscanf((char*)pNetbuf->p->payload + 7, "%f", &target_pos))// +7 so that it skips the "SETPOS:" part
 						  {
-							  msg_len = snprintf(msg, MAX_MSG_SIZE, "%f", target_pos);
+							  msg_len = snprintf(msg, MAX_MSG_SIZE, "posOK");
 							  //TODO: implement setpos
 						  }
 						  else
-							  msg_len = snprintf(msg, MAX_MSG_SIZE, "SETPOS_ERR");
+							  msg_len = snprintf(msg, MAX_MSG_SIZE, "posERR");
 					  }
 					  //sends the msg
-					  netconn_write(pTCP_conn_client, msg, msg_len, NETCONN_COPY);
+					  if (msg_len)
+						  netconn_write(pTCP_conn_client, msg, msg_len, NETCONN_COPY);
 				  }
 			  }while(netbuf_next(pNetbuf) >= 0);
 
@@ -508,7 +510,7 @@ void StartUDPStreamTask(void const * argument)
 			//unpacking data from queue
 			memcpy(&data, &queue_ret.value.v, sizeof(float));
 
-			msg_length = snprintf(message, MAX_MSG_SIZE, "Siemano kolano. [%f]", data);
+			msg_length = snprintf(message, MAX_MSG_SIZE, "0;%f;0;", data);
 			netbuf_alloc(pNetbuf, msg_length);
 			memcpy(pNetbuf->p->payload, message, msg_length);
 			netconn_sendto(pUDP_conn, pNetbuf, &dst_addr, 5000);
