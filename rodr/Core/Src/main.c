@@ -502,7 +502,7 @@ void StartUDPStreamTask(void const * argument)
 
  	/* Infinite loop */
 	for(;;)
-	{
+	{ c
 		queue_ret = osMessageGet(UDPMsgQueueHandle, osWaitForever);
 
 		if (queue_ret.status == osEventMessage)
