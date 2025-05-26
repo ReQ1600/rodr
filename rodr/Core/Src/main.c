@@ -56,7 +56,7 @@ osThreadId defaultTaskHandle;
 osThreadId TCPServerTaskHandle;
 osThreadId UDPStreamTaskHandle;
 osThreadId getPressureTaskHandle;
-osMessageQId pressureQueueHandle;
+osMessageQId UDPMsgQueueHandle;
 /* USER CODE BEGIN PV */
 
 /* USER CODE END PV */
@@ -130,9 +130,9 @@ int main(void)
   /* USER CODE END RTOS_TIMERS */
 
   /* Create the queue(s) */
-  /* definition and creation of pressureQueue */
-  osMessageQDef(pressureQueue, 2, float);
-  pressureQueueHandle = osMessageCreate(osMessageQ(pressureQueue), NULL);
+  /* definition and creation of UDPMsgQueue */
+  osMessageQDef(UDPMsgQueue, 4, float);
+  UDPMsgQueueHandle = osMessageCreate(osMessageQ(UDPMsgQueue), NULL);
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
@@ -140,7 +140,7 @@ int main(void)
 
   /* Create the thread(s) */
   /* definition and creation of defaultTask */
-  osThreadDef(defaultTask, StartDefaultTask, osPriorityNormal, 0, 512);
+  osThreadDef(defaultTask, StartDefaultTask, osPriorityNormal, 0, 256);
   defaultTaskHandle = osThreadCreate(osThread(defaultTask), NULL);
 
   /* definition and creation of TCPServerTask */
@@ -148,7 +148,7 @@ int main(void)
   TCPServerTaskHandle = osThreadCreate(osThread(TCPServerTask), NULL);
 
   /* definition and creation of UDPStreamTask */
-  osThreadDef(UDPStreamTask, StartUDPStreamTask, osPriorityIdle, 0, 516);
+  osThreadDef(UDPStreamTask, StartUDPStreamTask, osPriorityIdle, 0, 512);
   UDPStreamTaskHandle = osThreadCreate(osThread(UDPStreamTask), NULL);
 
   /* definition and creation of getPressureTask */
@@ -436,7 +436,11 @@ void StartDefaultTask(void const * argument)
 
 	  if (ctr % 100 == 0)
 	  {
-		  //mayne free mutex that allows for udp sending here??
+		  //packing float into int to put it into queue
+//		  uint32_t packed_data;
+//		  memcpy(&packed_data, &sensor_data, sizeof(float));
+//
+//		  osMessagePut(UDPMsgQueueHandle, packed_data, osWaitForever);
 	  }
 
 	  ++ctr;
@@ -492,7 +496,6 @@ void StartTCPServerTask(void const * argument)
 				  //process data
 				  if(pNetbuf->p->len >= strlen("PING"))
 				  {
-					  msg_len = 0;
 					  //handling ping
 					  if (!strcmp((char*)pNetbuf->p->payload, "PING"))
 						  msg_len = snprintf(msg, MAX_MSG_SIZE, "PONG");
@@ -504,15 +507,14 @@ void StartTCPServerTask(void const * argument)
 
 						  if (sscanf((char*)pNetbuf->p->payload + 7, "%f", &target_pos))// +7 so that it skips the "SETPOS:" part
 						  {
-							  msg_len = snprintf(msg, MAX_MSG_SIZE, "posOK");
+							  msg_len = snprintf(msg, MAX_MSG_SIZE, "%f");
 							  //TODO: implement setpos
 						  }
 						  else
-							  msg_len = snprintf(msg, MAX_MSG_SIZE, "posERR");
+							  msg_len = snprintf(msg, MAX_MSG_SIZE, "SETPOS_ERR");
 					  }
 					  //sends the msg
-					  if (msg_len)
-						  netconn_write(pTCP_conn_client, msg, msg_len, NETCONN_COPY);
+					  netconn_write(pTCP_conn_client, msg, msg_len, NETCONN_COPY);
 				  }
 			  }while(netbuf_next(pNetbuf) >= 0);
 
@@ -561,7 +563,7 @@ void StartUDPStreamTask(void const * argument)
  	/* Infinite loop */
 	for(;;)
 	{
-//		queue_ret = osMessageGet(UDPMsgQueueHandle, osWaitForever);
+		queue_ret = osMessageGet(UDPMsgQueueHandle, osWaitForever);
 
 		if (queue_ret.status == osEventMessage)
 		{
@@ -569,7 +571,7 @@ void StartUDPStreamTask(void const * argument)
 			//unpacking data from queue
 			memcpy(&data, &queue_ret.value.v, sizeof(float));
 
-			msg_length = snprintf(message, MAX_MSG_SIZE, "0;%f;0;", data);
+			msg_length = snprintf(message, MAX_MSG_SIZE, "0;%f;0]", data);
 			netbuf_alloc(pNetbuf, msg_length);
 			memcpy(pNetbuf->p->payload, message, msg_length);
 			netconn_sendto(pUDP_conn, pNetbuf, &dst_addr, 5000);
@@ -591,7 +593,8 @@ void StartUDPStreamTask(void const * argument)
 /* USER CODE END Header_startGetPressureTask */
 void startGetPressureTask(void const * argument)
 {
-  /* USER CODE BEGIN startGetPressureTask */
+	/* USER CODE BEGIN startGetPressureTask */
+	osDelay(100);
 	float voltage = 0;
 	float medianV = 0;
 
@@ -655,11 +658,11 @@ void startGetPressureTask(void const * argument)
 		uint32_t packed_data;
 		memcpy(&packed_data, &pressure, sizeof(float));
 
-		osMessagePut(pressureQueueHandle, packed_data, osWaitForever);
+		osMessagePut(UDPMsgQueueHandle, packed_data, osWaitForever);
 
-		osDelay(10);//should be changed to fit whatever we want to do
+		osDelay(100);//should be changed to fit whatever you want to do
 	}
-  /* USER CODE END startGetPressureTask */
+	  /* USER CODE END startGetPressureTask */
 }
 
 /**
