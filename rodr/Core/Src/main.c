@@ -622,10 +622,10 @@ void startGetPressureTask(void const * argument)
 		voltage_samples[short_id] = voltage;
 		short_id = GET_AVG_ID(short_id, SHORT_WIN);
 
-		if (short_id == 0) short_filed = true;
+		if (short_id == 0) short_filled = true;
 
 
-		if (short_filed)
+		if (short_filled)
 		{
 			medianV = SEN0257_getMedian(voltage_samples, SHORT_WIN);
 
