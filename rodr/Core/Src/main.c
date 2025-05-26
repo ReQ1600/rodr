@@ -600,7 +600,7 @@ void startGetPressureTask(void const * argument)
 
 	float voltage_samples[SHORT_WIN];
 	int short_id = 0;
-	bool short_filed = false;
+	bool short_filled = false;
 
 	float long_term_filtered[LONG_WIN];
 	int long_id = 0;
