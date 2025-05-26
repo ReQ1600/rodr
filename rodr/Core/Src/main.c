@@ -56,7 +56,7 @@ osThreadId defaultTaskHandle;
 osThreadId TCPServerTaskHandle;
 osThreadId UDPStreamTaskHandle;
 osThreadId getPressureTaskHandle;
-osMessageQId UDPMsgQueueHandle;
+osMessageQId UDPPressureQueueHandle;
 /* USER CODE BEGIN PV */
 
 /* USER CODE END PV */
@@ -130,9 +130,9 @@ int main(void)
   /* USER CODE END RTOS_TIMERS */
 
   /* Create the queue(s) */
-  /* definition and creation of UDPMsgQueue */
-  osMessageQDef(UDPMsgQueue, 4, float);
-  UDPMsgQueueHandle = osMessageCreate(osMessageQ(UDPMsgQueue), NULL);
+  /* definition and creation of UDPPressureQueue */
+  osMessageQDef(UDPPressureQueue, 4, float);
+  UDPPressureQueueHandle = osMessageCreate(osMessageQ(UDPPressureQueue), NULL);
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
@@ -440,7 +440,7 @@ void StartDefaultTask(void const * argument)
 //		  uint32_t packed_data;
 //		  memcpy(&packed_data, &sensor_data, sizeof(float));
 //
-//		  osMessagePut(UDPMsgQueueHandle, packed_data, osWaitForever);
+//		  osMessagePut(UDPPressureQueueHandle, packed_data, osWaitForever);
 	  }
 
 	  ++ctr;
@@ -563,7 +563,7 @@ void StartUDPStreamTask(void const * argument)
  	/* Infinite loop */
 	for(;;)
 	{
-		queue_ret = osMessageGet(UDPMsgQueueHandle, osWaitForever);
+		queue_ret = osMessageGet(UDPPressureQueueHandle, osWaitForever);
 
 		if (queue_ret.status == osEventMessage)
 		{
@@ -593,7 +593,7 @@ void StartUDPStreamTask(void const * argument)
 /* USER CODE END Header_startGetPressureTask */
 void startGetPressureTask(void const * argument)
 {
-	/* USER CODE BEGIN startGetPressureTask */
+  /* USER CODE BEGIN startGetPressureTask */
 	osDelay(100);
 	float voltage = 0;
 	float medianV = 0;
@@ -658,11 +658,11 @@ void startGetPressureTask(void const * argument)
 		uint32_t packed_data;
 		memcpy(&packed_data, &pressure, sizeof(float));
 
-		osMessagePut(UDPMsgQueueHandle, packed_data, osWaitForever);
+		osMessagePut(UDPPressureQueueHandle, packed_data, osWaitForever);
 
 		osDelay(100);//should be changed to fit whatever you want to do
 	}
-	  /* USER CODE END startGetPressureTask */
+  /* USER CODE END startGetPressureTask */
 }
 
 /**
