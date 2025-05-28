@@ -428,7 +428,7 @@ void StartDefaultTask(void const * argument)
   MX_LWIP_Init();
   /* USER CODE BEGIN 5 */
   int ctr = 0;
-  float sensor_data = 2137.223f;
+  float sensor_data = 0.223f;
   /* Infinite loop */
   for(;;)
   {
