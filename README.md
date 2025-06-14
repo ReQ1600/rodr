@@ -6,4 +6,3 @@
 
 ## TODO:
  - everything
- - add dht lib as submodule
