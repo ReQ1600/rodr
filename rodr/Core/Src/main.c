@@ -42,8 +42,6 @@ typedef enum{
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define MAX_MSG_SIZE 64
-//sen
-
 
 //dht
 #define DHT11_GPIO_PORT GPIOA
