@@ -28,16 +28,23 @@
 #include "lwip/api.h"
 
 #include "SEN0257.h"
+#include "dht11.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-
+typedef enum{
+	UP = 0,
+	DOWN
+} Direction;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define MAX_MSG_SIZE 64
+
+#define DHT11_GPIO_PORT GPIOA
+#define DHT11_GPIO_PIN GPIO_PIN_0
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -48,6 +55,10 @@
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
 
+TIM_HandleTypeDef htim3;
+TIM_HandleTypeDef htim4;
+
+UART_HandleTypeDef huart4;
 UART_HandleTypeDef huart3;
 
 PCD_HandleTypeDef hpcd_USB_OTG_FS;
@@ -56,9 +67,20 @@ osThreadId defaultTaskHandle;
 osThreadId TCPServerTaskHandle;
 osThreadId UDPStreamTaskHandle;
 osThreadId getPressureTaskHandle;
+osThreadId motorTaskHandle;
 osMessageQId UDPPressureQueueHandle;
+osMessageQId posQueueHandle;
+osMessageQId UDPTimestampQueueHandle;
+osMutexId dhtMutexHandle;
 /* USER CODE BEGIN PV */
-
+uint16_t temperature, humidity;
+struct DHT11 dht = {
+  DHT11_GPIO_PORT,
+  DHT11_GPIO_PIN,
+  &temperature,
+  &humidity,
+  &htim4
+};
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -67,10 +89,14 @@ static void MX_GPIO_Init(void);
 static void MX_USART3_UART_Init(void);
 static void MX_USB_OTG_FS_PCD_Init(void);
 static void MX_ADC1_Init(void);
+static void MX_TIM4_Init(void);
+static void MX_TIM3_Init(void);
+static void MX_UART4_Init(void);
 void StartDefaultTask(void const * argument);
 void StartTCPServerTask(void const * argument);
 void StartUDPStreamTask(void const * argument);
 void startGetPressureTask(void const * argument);
+void StartMotorTask(void const * argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -113,9 +139,17 @@ int main(void)
   MX_USART3_UART_Init();
   MX_USB_OTG_FS_PCD_Init();
   MX_ADC1_Init();
+  MX_TIM4_Init();
+  MX_TIM3_Init();
+  MX_UART4_Init();
   /* USER CODE BEGIN 2 */
 
   /* USER CODE END 2 */
+
+  /* Create the mutex(es) */
+  /* definition and creation of dhtMutex */
+  osMutexDef(dhtMutex);
+  dhtMutexHandle = osMutexCreate(osMutex(dhtMutex));
 
   /* USER CODE BEGIN RTOS_MUTEX */
   /* add mutexes, ... */
@@ -134,6 +168,14 @@ int main(void)
   osMessageQDef(UDPPressureQueue, 4, float);
   UDPPressureQueueHandle = osMessageCreate(osMessageQ(UDPPressureQueue), NULL);
 
+  /* definition and creation of posQueue */
+  osMessageQDef(posQueue, 4, uint16_t);
+  posQueueHandle = osMessageCreate(osMessageQ(posQueue), NULL);
+
+  /* definition and creation of UDPTimestampQueue */
+  osMessageQDef(UDPTimestampQueue, 4, uint32_t);
+  UDPTimestampQueueHandle = osMessageCreate(osMessageQ(UDPTimestampQueue), NULL);
+
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
   /* USER CODE END RTOS_QUEUES */
@@ -148,12 +190,16 @@ int main(void)
   TCPServerTaskHandle = osThreadCreate(osThread(TCPServerTask), NULL);
 
   /* definition and creation of UDPStreamTask */
-  osThreadDef(UDPStreamTask, StartUDPStreamTask, osPriorityIdle, 0, 512);
+  osThreadDef(UDPStreamTask, StartUDPStreamTask, osPriorityIdle, 0, 256);
   UDPStreamTaskHandle = osThreadCreate(osThread(UDPStreamTask), NULL);
 
   /* definition and creation of getPressureTask */
-  osThreadDef(getPressureTask, startGetPressureTask, osPriorityIdle, 0, 128);
+  osThreadDef(getPressureTask, startGetPressureTask, osPriorityIdle, 0, 256);
   getPressureTaskHandle = osThreadCreate(osThread(getPressureTask), NULL);
+
+  /* definition and creation of motorTask */
+  osThreadDef(motorTask, StartMotorTask, osPriorityIdle, 0, 256);
+  motorTaskHandle = osThreadCreate(osThread(motorTask), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -285,6 +331,135 @@ static void MX_ADC1_Init(void)
 }
 
 /**
+  * @brief TIM3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM3_Init(void)
+{
+
+  /* USER CODE BEGIN TIM3_Init 0 */
+
+  /* USER CODE END TIM3_Init 0 */
+
+  TIM_Encoder_InitTypeDef sConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM3_Init 1 */
+
+  /* USER CODE END TIM3_Init 1 */
+  htim3.Instance = TIM3;
+  htim3.Init.Prescaler = 0;
+  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim3.Init.Period = 65535;
+  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  sConfig.EncoderMode = TIM_ENCODERMODE_TI1;
+  sConfig.IC1Polarity = TIM_ICPOLARITY_RISING;
+  sConfig.IC1Selection = TIM_ICSELECTION_DIRECTTI;
+  sConfig.IC1Prescaler = TIM_ICPSC_DIV1;
+  sConfig.IC1Filter = 0;
+  sConfig.IC2Polarity = TIM_ICPOLARITY_RISING;
+  sConfig.IC2Selection = TIM_ICSELECTION_DIRECTTI;
+  sConfig.IC2Prescaler = TIM_ICPSC_DIV1;
+  sConfig.IC2Filter = 0;
+  if (HAL_TIM_Encoder_Init(&htim3, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM3_Init 2 */
+
+  /* USER CODE END TIM3_Init 2 */
+
+}
+
+/**
+  * @brief TIM4 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM4_Init(void)
+{
+
+  /* USER CODE BEGIN TIM4_Init 0 */
+
+  /* USER CODE END TIM4_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM4_Init 1 */
+
+  /* USER CODE END TIM4_Init 1 */
+  htim4.Instance = TIM4;
+  htim4.Init.Prescaler = 95;
+  htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim4.Init.Period = 65535;
+  htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim4.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim4) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim4, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim4, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM4_Init 2 */
+
+  /* USER CODE END TIM4_Init 2 */
+
+}
+
+/**
+  * @brief UART4 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_UART4_Init(void)
+{
+
+  /* USER CODE BEGIN UART4_Init 0 */
+
+  /* USER CODE END UART4_Init 0 */
+
+  /* USER CODE BEGIN UART4_Init 1 */
+
+  /* USER CODE END UART4_Init 1 */
+  huart4.Instance = UART4;
+  huart4.Init.BaudRate = 115200;
+  huart4.Init.WordLength = UART_WORDLENGTH_8B;
+  huart4.Init.StopBits = UART_STOPBITS_1;
+  huart4.Init.Parity = UART_PARITY_NONE;
+  huart4.Init.Mode = UART_MODE_TX_RX;
+  huart4.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart4.Init.OverSampling = UART_OVERSAMPLING_16;
+  huart4.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+  huart4.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
+  if (HAL_HalfDuplex_Init(&huart4) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN UART4_Init 2 */
+
+  /* USER CODE END UART4_Init 2 */
+
+}
+
+/**
   * @brief USART3 Initialization Function
   * @param None
   * @retval None
@@ -375,7 +550,13 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOG_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, LD1_Pin|LD3_Pin|LD2_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_2, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, LD1_Pin|GPIO_PIN_1|LD3_Pin|LD2_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_11, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(USB_PowerSwitchOn_GPIO_Port, USB_PowerSwitchOn_Pin, GPIO_PIN_RESET);
@@ -386,12 +567,26 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(USER_Btn_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : LD1_Pin LD3_Pin LD2_Pin */
-  GPIO_InitStruct.Pin = LD1_Pin|LD3_Pin|LD2_Pin;
+  /*Configure GPIO pin : PC2 */
+  GPIO_InitStruct.Pin = GPIO_PIN_2;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : LD1_Pin PB1 LD3_Pin LD2_Pin */
+  GPIO_InitStruct.Pin = LD1_Pin|GPIO_PIN_1|LD3_Pin|LD2_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PD11 */
+  GPIO_InitStruct.Pin = GPIO_PIN_11;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
   /*Configure GPIO pin : USB_PowerSwitchOn_Pin */
   GPIO_InitStruct.Pin = USB_PowerSwitchOn_Pin;
@@ -427,23 +622,27 @@ void StartDefaultTask(void const * argument)
   /* init code for LWIP */
   MX_LWIP_Init();
   /* USER CODE BEGIN 5 */
-  int ctr = 0;
-  float sensor_data = 0.223f;
+  uint32_t time;
+
   /* Infinite loop */
   for(;;)
   {
-	  if (ctr % 200 == 0) HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+	  time = osKernelSysTick();
 
-	  if (ctr % 100 == 0)
+	  //heartbeat
+	  if (time % pdMS_TO_TICKS(200) == 0)
+		  HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+
+	  //dht cahnges response every 1 second
+	  if (time % pdMS_TO_TICKS(1000) == 0)
 	  {
-		  //packing float into int to put it into queue
-//		  uint32_t packed_data;
-//		  memcpy(&packed_data, &sensor_data, sizeof(float));
-//
-//		  osMessagePut(UDPPressureQueueHandle, packed_data, osWaitForever);
+		  if (osMutexWait(dhtMutexHandle, osWaitForever))
+		  {
+			  DHT11_ReadData(&dht);
+			  osMutexRelease(dhtMutexHandle);
+		  }
 	  }
 
-	  ++ctr;
 	  osDelay(1);
   }
   /* USER CODE END 5 */
@@ -465,7 +664,7 @@ void StartTCPServerTask(void const * argument)
 	struct netbuf* pNetbuf;
 	void* data;
 	uint16_t data_len;
-	char msg[MAX_MSG_SIZE] = { 0 };
+	static char msg[MAX_MSG_SIZE] = { 0 };
 	uint16_t msg_len;
 
 	//TCP setup
@@ -543,9 +742,11 @@ void StartUDPStreamTask(void const * argument)
 	osDelay(100);
 
 	osEvent queue_ret;
+	float pressure;
+	uint16_t dht_humidity = 0;
 
 	//msg setup
-	char message[MAX_MSG_SIZE];
+	static char message[MAX_MSG_SIZE];
 	uint16_t msg_length = 0;
 
 	struct netbuf* pNetbuf;
@@ -563,23 +764,29 @@ void StartUDPStreamTask(void const * argument)
  	/* Infinite loop */
 	for(;;)
 	{
-		queue_ret = osMessageGet(UDPPressureQueueHandle, osWaitForever);
+		//dht
+		if (osMutexWait(dhtMutexHandle, 100) == osOK)
+		{
+			dht_humidity = humidity;
+			osMutexRelease(dhtMutexHandle);
+		}
 
+		//pressure
+		queue_ret = osMessageGet(UDPPressureQueueHandle, osWaitForever);
+		if (queue_ret.status == osEventMessage)
+			pressure = *(float*)&queue_ret.value.v;
+
+		//timestamp and send
+		queue_ret = osMessageGet(UDPTimestampQueueHandle, osWaitForever);
 		if (queue_ret.status == osEventMessage)
 		{
-			float data;
-			//unpacking data from queue
-			memcpy(&data, &queue_ret.value.v, sizeof(float));
-
-			msg_length = snprintf(message, MAX_MSG_SIZE, "0;%f;0]", data);
+			msg_length = snprintf(message, MAX_MSG_SIZE, "%lu;%f;%d", queue_ret.value.v, pressure, dht_humidity);
 			netbuf_alloc(pNetbuf, msg_length);
 			memcpy(pNetbuf->p->payload, message, msg_length);
 			netconn_sendto(pUDP_conn, pNetbuf, &dst_addr, 5000);
 			netbuf_free(pNetbuf);
-
-			osDelay(10);
 		}
-
+		osDelay(10);
 	}
   /* USER CODE END StartUDPStreamTask */
 }
@@ -595,26 +802,28 @@ void startGetPressureTask(void const * argument)
 {
   /* USER CODE BEGIN startGetPressureTask */
 	osDelay(100);
+	uint32_t time = osKernelSysTick();
+
 	float voltage = 0;
 	float medianV = 0;
 
-	float voltage_samples[SHORT_WIN];
+	static float voltage_samples[SHORT_WIN];
 	int short_id = 0;
 	bool short_filled = false;
 
-	float long_term_filtered[LONG_WIN];
+	static float long_term_filtered[LONG_WIN];
 	int long_id = 0;
 	bool long_filled = false;
 
-	float fir_avg_buff[LONG_WIN] = { 0 };
+	static float fir_avg_buff[LONG_WIN] = { 0 };
 	int fir_avg_id= 0;
 	bool fir_avg_filled = false;
 
 	float long_fir_avg = 0.0f;
-	float long_fir = 0.0f;
 
 	float pressure = 0;
-  /* Infinite loop */
+
+	/* Infinite loop */
 	for(;;)
 	{
 		voltage = SEN0257_readStableAnalog(5, &hadc1) * 5.0f / 4095.0f;
@@ -624,10 +833,9 @@ void startGetPressureTask(void const * argument)
 
 		if (short_id == 0) short_filled = true;
 
-
 		if (short_filled)
 		{
-			medianV = SEN0257_getMedian(voltage_samples, SHORT_WIN);
+			medianV = SEN0257_getMedian(voltage_samples);
 
 			long_term_filtered[long_id] = medianV;
 			long_id = GET_AVG_ID(long_id, LONG_WIN);
@@ -644,25 +852,43 @@ void startGetPressureTask(void const * argument)
 		if (fir_avg_filled)
 		{
 			float sum = 0.0f;
-			for (int i = 0; i < LONG_WIN; i++)
+			for (int i = 0; i < LONG_WIN-1; i++)
 				sum += fir_avg_buff[i];
 
 			long_fir_avg = sum / LONG_WIN;
 		}
 		else
-			long_fir_avg = medianV;  // use current val until buff filled
+			long_fir_avg = medianV; // use current val until buff filled
 
 		pressure = (long_fir_avg - OFFSET) * 250.0f;//this is output so it should be queued
+		time = osKernelSysTick();
 
 		//packing float into int to put it into queue
-		uint32_t packed_data;
-		memcpy(&packed_data, &pressure, sizeof(float));
+		osMessagePut(UDPPressureQueueHandle, *(uint32_t*)&pressure, osWaitForever);
+		osMessagePut(UDPTimestampQueueHandle, time, osWaitForever);
 
-		osMessagePut(UDPPressureQueueHandle, packed_data, osWaitForever);
-
-		osDelay(100);//should be changed to fit whatever you want to do
+		osDelay(20);//should be changed to fit whatever you want to do
 	}
+
   /* USER CODE END startGetPressureTask */
+}
+
+/* USER CODE BEGIN Header_StartMotorTask */
+/**
+* @brief Function implementing the motorTask thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartMotorTask */
+void StartMotorTask(void const * argument)
+{
+  /* USER CODE BEGIN StartMotorTask */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(1);
+  }
+  /* USER CODE END StartMotorTask */
 }
 
 /**
