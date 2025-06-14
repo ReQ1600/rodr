@@ -42,9 +42,23 @@ typedef enum{
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define MAX_MSG_SIZE 64
+//sen
 
+
+//dht
 #define DHT11_GPIO_PORT GPIOA
 #define DHT11_GPIO_PIN GPIO_PIN_0
+
+//motor
+#define PHASE_PORT GPIOC
+#define PHASE_PIN GPIO_PIN_2
+#define EN_PORT GPIOB
+#define EN_PIN GPIO_PIN_1
+
+#define MAX_POS 1220
+#define MIN_POS 41
+#define POS_TOLERANCE 1
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -659,7 +673,6 @@ void StartTCPServerTask(void const * argument)
 {
   /* USER CODE BEGIN StartTCPServerTask */
 	osDelay(100);
-
 	//msg setup
 	struct netbuf* pNetbuf;
 	void* data;
@@ -702,12 +715,14 @@ void StartTCPServerTask(void const * argument)
 					  //handling setPos
 					  else if (!strncmp((char*)pNetbuf->p->payload, "SETPOS", 6))
 					  {
-						  float target_pos = 0;
+						  unsigned int target_pos = 0;
 
-						  if (sscanf((char*)pNetbuf->p->payload + 7, "%f", &target_pos))// +7 so that it skips the "SETPOS:" part
+						  if (sscanf((char*)pNetbuf->p->payload + 7, "%u", &target_pos))// +7 so that it skips the "SETPOS:" part
 						  {
-							  msg_len = snprintf(msg, MAX_MSG_SIZE, "%f");
-							  //TODO: implement setpos
+							  msg_len = snprintf(msg, MAX_MSG_SIZE, "SETPOS_OK");
+
+							  if (target_pos > MAX_POS) target_pos = MAX_POS;
+							  osMessagePut(posQueueHandle, target_pos, osWaitForever);
 						  }
 						  else
 							  msg_len = snprintf(msg, MAX_MSG_SIZE, "SETPOS_ERR");
@@ -882,13 +897,65 @@ void startGetPressureTask(void const * argument)
 /* USER CODE END Header_StartMotorTask */
 void StartMotorTask(void const * argument)
 {
-  /* USER CODE BEGIN StartMotorTask */
-  /* Infinite loop */
-  for(;;)
-  {
-    osDelay(1);
-  }
-  /* USER CODE END StartMotorTask */
+	/* USER CODE BEGIN StartMotorTask */
+
+	//done in phase/enable mode
+	int32_t curr_pos = 0;
+	uint16_t target = 0;
+	Direction last_dir = UP;
+	int32_t u = 0;
+
+	osEvent queue_ret;
+
+	//callibration
+	HAL_GPIO_WritePin(EN_PORT, EN_PIN , 1);
+	HAL_GPIO_WritePin(PHASE_PORT, PHASE_PIN, 1);
+	osDelay(5000);
+	HAL_GPIO_WritePin(EN_PORT, EN_PIN , 0);
+	curr_pos = MIN_POS;
+
+	/* Infinite loop */
+	for(;;)
+	{
+		queue_ret = osMessageGet(posQueueHandle, osWaitForever);
+		if (queue_ret.status == osEventMessage)
+			target = queue_ret.value.v;
+
+		if (target > MAX_POS) target = MAX_POS;
+		else if (target < MIN_POS) target = MIN_POS;
+
+		if (last_dir == UP && curr_pos < target)
+		{
+			last_dir = DOWN;
+			curr_pos -= 40;
+		}
+		else if(last_dir == DOWN && curr_pos > target)
+		{
+			last_dir = UP;
+			curr_pos += 40;
+		}
+
+		while(abs(target - curr_pos) > POS_TOLERANCE)
+		{
+			if((int16_t)__HAL_TIM_GET_COUNTER(&htim3) < 0)
+				__HAL_TIM_SET_COUNTER(&htim3, 0);
+
+			curr_pos = __HAL_TIM_GET_COUNTER(&htim3);
+			u = (target - curr_pos);
+
+			//motor control
+			HAL_GPIO_WritePin(EN_PORT, EN_PIN , 1);
+
+			if (u > 0) HAL_GPIO_WritePin(PHASE_PORT, PHASE_PIN, 0);
+
+			else HAL_GPIO_WritePin(PHASE_PORT, PHASE_PIN, 1);
+
+			osDelay(10);
+		}
+		HAL_GPIO_WritePin(EN_PORT, EN_PIN, 0);
+	}
+
+	/* USER CODE END StartMotorTask */
 }
 
 /**
